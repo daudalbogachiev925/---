@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+===============================================================================
+ СВОЙСТВА ХЕШ-ФУНКЦИЙ В ЭКСПЕРИМЕНТЕ
+ Контрольная точка по Теме 1 раздела «Хеширование»
+ Дисциплина «Алгоритмы и структуры данных», направление Data Engineering
+===============================================================================
+"""
+
+import random
+import math
+
+# =============================================================================
+#  Раздел 1. Реализация хеш-функций
+# =============================================================================
+
+def division_hash(k, m):
+    """Метод деления: h(k) = k mod m."""
+    return k % m
+
+
+class UniversalHash:
+    """Функция из универсального семейства H(p, m).
+    h_ab(k) = ((a*k + b) mod p) mod m, где p - простое, p > u, a != 0.
+    """
+    DEFAULT_P = 2 ** 31 - 1  # Простое число Мерсенна
+
+    def __init__(self, m, p=None, a=None, b=None, rng=None):
+        rng = rng or random
+        self.m = m
+        self.p = p if p is not None else self.DEFAULT_P
+        # a != 0 обязательно, иначе функция станет константой
+        self.a = a if a is not None else rng.randrange(1, self.p)
+        self.b = b if b is not None else rng.randrange(0, self.p)
+
+    def __call__(self, k):
+        return ((self.a * k + self.b) % self.p) % self.m
+
+    def __repr__(self):
+        return f"h_ab(m={self.m}, a={self.a}, b={self.b})"
+
+
+# =============================================================================
+#  Раздел 2. Вспомогательные функции для измерений
+# =============================================================================
+
+def get_hash_stats(keys, hash_func, m):
+    """Возвращает статистику распределения ключей по индексам."""
+    loads = [0] * m
+    for k in keys:
+        loads[hash_func(k)] += 1
+    
+    n = len(keys)
+    occupied = sum(1 for c in loads if c > 0)
+    empty = m - occupied
+    max_len = max(loads) if loads else 0
+    mean_len = n / m if m > 0 else 0.0
+    
+    return {
+        "mean": mean_len,
+        "max": max_len,
+        "empty": empty
+    }
+
+
+def estimate_collision_probability(k1, k2, m, trials, seed=None):
+    """Эмпирическая оценка Pr{h(k1) = h(k2)} по случайным h из семейства."""
+    rng = random.Random(seed)
+    hits = 0
+    for _ in range(trials):
+        h = UniversalHash(m, rng=rng)
+        if h(k1) == h(k2):
+            hits += 1
+    return hits / trials
+
+
+# =============================================================================
+#  Раздел 3. Выполнение задания (Контрольная точка)
+# =============================================================================
+
+def run_kt():
+    print("=" * 80)
+    print("ЗАДАНИЕ 1. Отказ фиксированной функции (m=32, n=128)")
+    print("=" * 80)
+    
+    m = 32
+    n = 128
+    
+    # Формируем три набора ключей
+    rng = random.Random(42)
+    keys_random = [rng.randrange(0, 10**6) for _ in range(n)]
+    keys_multiples = [i * m for i in range(n)]          # Кратны m
+    c = 7
+    keys_offset = [c + i * m for i in range(n)]         # Вида c + i*m
+    
+    key_sets = {
+        "Случайные ключи": keys_random,
+        f"Ключи, кратные m ({m})": keys_multiples,
+        f"Ключи вида c + i*m (c={c})": keys_offset
+    }
+    
+    print(f"{'Набор ключей':<35} | {'Функция':<25} | {'Среднее':<8} | {'Максимум':<9} | {'Пустых':<6}")
+    print("-" * 95)
+    
+    for name, keys in key_sets.items():
+        # Статистика для division_hash
+        stats_div = get_hash_stats(keys, lambda k: division_hash(k, m), m)
+        print(f"{name:<35} | {'division_hash':<25} | {stats_div['mean']:<8.2f} | {stats_div['max']:<9} | {stats_div['empty']:<6}")
+        
+        # Статистика для UniversalHash
+        h_univ = UniversalHash(m, rng=random.Random(2024))
+        stats_univ = get_hash_stats(keys, h_univ, m)
+        print(f"{name:<35} | {str(h_univ):<25} | {stats_univ['mean']:<8.2f} | {stats_univ['max']:<9} | {stats_univ['empty']:<6}")
+        
+    print()
+    print("КОММЕНТАРИЙ: Почему средняя длина во всех шести случаях одинакова?")
+    print("Средняя длина цепочки математически равна n / m (общее число ключей,")
+    print("делённое на число ячеек). Поскольку во всех шести экспериментах n = 128")
+    print("и m = 32 строго фиксированы, среднее значение всегда равно 128 / 32 = 4.0.")
+    print("Средняя длина зависит только от этих двух параметров, но не от качества")
+    print("хеш-функции или распределения ключей. Именно поэтому для оценки качества")
+    print("хеширования необходимо смотреть на максимальную длину цепочки и число")
+    print("пустых ячеек, а не на среднее (как видно из таблицы, максимум у division_hash")
+    print("на 'плохих' данных равен 128, что означает полную деградацию в список).")
+    print()
+
+    print("=" * 80)
+    print("ЗАДАНИЕ 2. Проверка универсальности")
+    print("=" * 80)
+    
+    trials = 10000
+    m_test = 32
+    
+    # 5 пар ключей, включая пару, отличающуюся ровно на m
+    key_pairs = [
+        (10, 25),
+        (1000, 5000),
+        (100, 100 + m_test),       # Отличаются ровно на m
+        (999999, 1),
+        (42, 42 + 2 * m_test)
+    ]
+    
+    print(f"Эмпирическая оценка Pr{{h(k1) = h(k2)}} при {trials} испытаниях (m={m_test}, 1/m = {1/m_test:.5f}):")
+    print(f"{'k1':<10} | {'k2':<10} | {'Оценка Pr':<12} | {'1/m':<10} | {'Условие <= 1/m'}")
+    print("-" * 70)
+    
+    for k1, k2 in key_pairs:
+        pr = estimate_collision_probability(k1, k2, m_test, trials, seed=k1+k2)
+        condition_met = "Да" if pr <= (1 / m_test) * 1.15 else "Нет" # *1.15 для учёта статистического шума
+        diff_note = " (отличаются на m)" if k2 - k1 == m_test else ""
+        print(f"{k1:<10} | {k2:<10} | {pr:<12.5f} | {1/m_test:<10.5f} | {condition_met}{diff_note}")
+        
+    print()
+    print("ДЕМОНСТРАЦИЯ ВЫРОЖДЕНИЯ ПРИ a = 0:")
+    h_degenerate = UniversalHash(m=16, a=0, b=7)
+    test_keys = [0, 1, 2, 3, 100, 999]
+    hashes = [h_degenerate(k) for k in test_keys]
+    print(f"Функция: {h_degenerate}")
+    print(f"Ключи:   {test_keys}")
+    print(f"Хеши:    {hashes}")
+    print("-> Все ключи отправлены в один индекс (7). Функция стала константой.")
+    print()
+    
+    print("ОТВЕТЫ НА ВОПРОСЫ (комментарий):")
+    print("(a) Вероятность в определении универсальности берётся по случайному выбору")
+    print("    хеш-функции из семейства, а не по распределению входных ключей. Это")
+    print("    принципиально, так как гарантирует ожидаемое время O(1) даже если")
+    print("    злоумышленник заранее подобрал «плохой» набор ключей (атака hash flooding).")
+    print("(b) Условие a != 0 обязательно, потому что при a = 0 функция вырождается в")
+    print("    константу h(k) = b mod m, отправляя все ключи в один индекс и вызывая")
+    print("    деградацию до O(n). Условие b != 0 не обязательно, так как b лишь")
+    print("    сдвигает значения, и функция h(k) = (a*k) mod p mod m остаётся рабочей.")
+    print("(c) При росте n и фиксированном m коэффициент заполнения alpha = n/m растёт.")
+    print("    Ожидаемая длина цепочки E[X] <= 1 + (n-1)/m увеличивается линейно, что")
+    print("    приводит к деградации операций с O(1) до O(n), поэтому хеш-таблицы")
+    print("    требуют периодического изменения размера (rehashing) при росте n.")
+
+if __name__ == "__main__":
+    run_kt()
